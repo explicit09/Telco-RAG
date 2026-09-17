@@ -58,7 +58,7 @@ def main():
     repository = inventory['repository'] if mirrored else 'netop/3GPP-R18'
     revision = inventory['revision'] if mirrored else REVISION
     source_rows = inventory['files'] if mirrored else inventory
-    rows = sorted([r for r in source_rows if r['path'].endswith(('.docx', '/raw.md'))], key=lambda r: r['path'])
+    rows = sorted([r for r in source_rows if r['path'].endswith(('.docx', '.doc', '/raw.md'))], key=lambda r: r['path'])
     base = f'https://huggingface.co/datasets/{repository}/resolve/{revision}/'
     if args.limit:
         rows = rows[:args.limit]
