@@ -56,7 +56,7 @@ not a reproduction of the paper's unpublished question-ID subset.
 Keep generated benchmark files outside this repository and out of retrieval
 indexes. Do not inspect held-out errors to tune the system. The current split
 has not been certified free of semantic near-duplicates, and public benchmark
-pretraining exposure cannot be ruled out. No benchmark generation has run.
+pretraining exposure cannot be ruled out. No held-out generation has run.
 
 Subscription-backed Codex trials are intended for development. CLI read-only
 mode does not prevent reading local answer files; strict held-out runs require
@@ -81,10 +81,15 @@ options, and gold files were verified unchanged. No held-out inference preceded
 this correction. The first three-question v1 diagnostic is superseded and must
 not be presented as a valid release-matched benchmark score.
 
-The development partition requests Releases 14, 16, 17, 18, and 19. Only the
-Release 18 corpus is currently indexed. Missing releases remain in the target
-scope; they must not be silently dropped, relabeled, or answered from a different
-release without a separately justified cross-version protocol. Direct downloads of two official ETSI Release 17 sources returned HTTP 403. Their Release 17 counterparts were subsequently downloaded, hash-verified, and indexed from the GSMA mirror. Full missing-release ingestion is in progress.
+The development partition requests Releases 14, 16, 17, 18, and 19. All five
+releases are now indexed: 6,439 documents and 5,833,722 chunks. Database row and
+distinct-document counts match the index manifests, whose source-manifest hashes
+were verified. This establishes index completeness against the pinned inventories,
+not semantic fidelity of mirror parsing or answerability of every question.
+Requests must not be silently dropped, relabeled, or answered from a different
+release without a separately justified cross-version protocol. Direct downloads
+of two official ETSI Release 17 sources returned HTTP 403; the GSMA mirror supplied
+the missing releases instead.
 
 ## Multi-release mirror and registry
 
@@ -143,3 +148,23 @@ byte-for-byte identical to v2. The ongoing first-20 development run is unaffecte
 candidate and preserves held-out files. The repeated lexical screen found zero
 remaining cross-split candidates. This is not proof that every semantic
 near-duplicate or pretraining exposure is absent.
+
+## Development scoring and performance checks
+
+`tools/score_development_run.py PREDICTIONS DEV_QUESTIONS DEV_ANSWERS REPORT`
+requires a completed development manifest and verifies prediction, question, and
+reference-answer hashes. Every planned question remains in the denominator.
+`tools/compare_development_runs.py LEFT RIGHT DEV_QUESTIONS DEV_ANSWERS REPORT`
+checks matching model, code, question IDs, corpus provenance, and execution settings,
+then reports paired improvements/regressions. Indexing durations are excluded from
+the corpus comparison. These reports explicitly do not establish goal achievement.
+
+`tools/prototype_rank_stream.py` is an isolated optimization experiment, not yet
+used by the evaluation runner. It streams SQLite's ranked matches, includes all
+ties at the cutoff, and sorts tied IDs deterministically. Synthetic scope/tie tests
+and one development query from each of the five releases returned exactly the same
+top 40 IDs and scores as the existing search. Observed streaming times were about
+2.4–5.9 seconds versus 11.7–100.8 seconds for the exhaustive query. These are small,
+uncontrolled timing diagnostics with possible cache and concurrent-job effects,
+not a general performance guarantee. The running lexical and reranked comparisons
+retain their original search implementation.
