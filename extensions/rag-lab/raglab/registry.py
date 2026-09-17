@@ -13,36 +13,46 @@ class CorpusRegistry:
         if not isinstance(config, dict) or not config:
             raise ValueError('registry must map corpus IDs to database paths')
         self.paths = {}
-        for corpus, filename in config.items():
-            if not isinstance(corpus, str) or not corpus or not isinstance(filename, str):
+        for corpus, filenames in config.items():
+            if isinstance(filenames, str):
+                filenames = [filenames]
+            if (not isinstance(corpus, str) or not corpus or not isinstance(filenames, list)
+                    or not filenames or any(not isinstance(name, str) or not name for name in filenames)):
                 raise ValueError('invalid corpus registry entry')
-            database = (self.path.parent / filename).resolve()
-            if not database.is_file():
-                raise FileNotFoundError(f'missing database for {corpus}: {database}')
-            self.paths[corpus] = database
+            databases = tuple((self.path.parent / name).resolve() for name in filenames)
+            if len(set(databases)) != len(databases):
+                raise ValueError('duplicate database for corpus')
+            for database in databases:
+                if not database.is_file():
+                    raise FileNotFoundError(f'missing database for {corpus}: {database}')
+            self.paths[corpus] = databases
         self.stores = {}
+        self.active_corpora = {}
 
-    def _store(self, corpus):
+    def _stores_for(self, corpus):
         if corpus not in self.paths:
             raise ValueError(f'corpus is not registered: {corpus}')
-        if corpus not in self.stores:
-            self.stores[corpus] = SQLiteStore(self.paths[corpus])
-        return self.stores[corpus]
+        for database in self.paths[corpus]:
+            if database not in self.stores:
+                self.stores[database] = SQLiteStore(database)
+            self.active_corpora.setdefault(database, set()).add(corpus)
+            yield self.stores[database]
 
     def search(self, query, *, corpus_ids, release=None, limit=10):
         if not corpus_ids:
             raise ValueError('corpus_ids must be non-empty')
-        rankings = [self._store(c).search(query, corpus_ids=[c], release=release, limit=limit) for c in dict.fromkeys(corpus_ids)]
+        if limit <= 0:
+            return []
+        rankings = [store.search(query, corpus_ids=[corpus], release=release, limit=limit)
+                    for corpus in dict.fromkeys(corpus_ids) for store in self._stores_for(corpus)]
         return fuse_rankings(rankings)[:limit]
 
     def get_chunk(self, identifier):
-        # Search only databases opened by explicit corpus requests.
+        # Only previously requested corpora in opened databases are eligible.
         found = []
-        for corpus, store in self.stores.items():
+        for database, store in self.stores.items():
             chunk = store.get_chunk(identifier)
-            if chunk is not None:
-                if chunk.corpus_id != corpus:
-                    raise ValueError('chunk belongs to a different corpus')
+            if chunk is not None and chunk.corpus_id in self.active_corpora[database]:
                 found.append(chunk)
         if len(found) > 1:
             raise ValueError('ambiguous chunk ID across databases')
@@ -53,17 +63,20 @@ class CorpusRegistry:
         for corpus in sorted(set(corpus_ids)):
             if corpus not in self.paths:
                 raise ValueError(f'corpus is not registered: {corpus}')
-            manifest = self.paths[corpus].with_suffix('.manifest.json')
-            record = json.loads(manifest.read_text())
-            if record.get('corpus') != corpus:
-                raise ValueError('database manifest corpus mismatch')
-            result[corpus] = record
+            records = []
+            for database in self.paths[corpus]:
+                record = json.loads(database.with_suffix('.manifest.json').read_text())
+                if record.get('corpus') != corpus:
+                    raise ValueError('database manifest corpus mismatch')
+                records.append(record)
+            result[corpus] = records[0] if len(records) == 1 else {'corpus': corpus, 'parts': records}
         return result
 
     def close(self):
         for store in self.stores.values():
             store.close()
         self.stores.clear()
+        self.active_corpora.clear()
 
     def __enter__(self):
         return self

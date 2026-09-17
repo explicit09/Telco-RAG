@@ -16,7 +16,7 @@ class ComparisonTests(unittest.TestCase):
                 path.write_text(json.dumps({f'q{n}':{'selected_option':answer,'abstained':answer is None} for n,answer in enumerate(answers,1)}))
                 path.with_suffix('.manifest.json').write_text(json.dumps({'status':'completed','development_only':True,'model':'fixture',
                     'question_ids':['q1','q2','q3','q4'],'predictions_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
-                    'question_file_sha256':hashlib.sha256(q.read_bytes()).hexdigest(),'corpus_manifest':{'a':{'source_manifest_sha256':'same','seconds':1 if path==paths[0] else 2}}}))
+                    'question_file_sha256':hashlib.sha256(q.read_bytes()).hexdigest(),'corpus_manifest':{'a':{'corpus':'a','parts':[{'source_manifest_sha256':'same','seconds':1 if path==paths[0] else 2}]}}}))
             report=compare(*paths,q,a)
             self.assertEqual(report['paired_counts'],dict(both_correct=1,right_improved=1,right_regressed=1,both_incorrect=1))
             self.assertEqual(report['accuracy_difference'],0)

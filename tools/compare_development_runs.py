@@ -6,6 +6,14 @@ from score_development_run import score_run
 from raglab.evaluation import load_answers
 
 
+def corpus_identity(value):
+    if isinstance(value, dict):
+        return {key:corpus_identity(item) for key,item in value.items() if key != 'seconds'}
+    if isinstance(value, list):
+        return [corpus_identity(item) for item in value]
+    return value
+
+
 def compare(left, right, questions, answers):
     left, right = Path(left), Path(right)
     scores = [score_run(path, questions, answers) for path in (left, right)]
@@ -15,8 +23,7 @@ def compare(left, right, questions, answers):
         if manifests[0].get(field) != manifests[1].get(field):
             raise ValueError(f'unmatched comparison: {field}')
     # Indexing duration changes after a verified resume; it is not corpus content.
-    provenance = [{key:{k:v for k,v in value.items() if k != 'seconds'}
-                   for key,value in manifest['corpus_manifest'].items()} for manifest in manifests]
+    provenance = [corpus_identity(manifest['corpus_manifest']) for manifest in manifests]
     if provenance[0] != provenance[1]:
         raise ValueError('unmatched comparison: corpus provenance')
     predictions = [json.loads(path.read_text()) for path in (left, right)]

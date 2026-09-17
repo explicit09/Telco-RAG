@@ -190,3 +190,12 @@ questions by seeded ID hashes, reserves at least one per release, and copies
 labels only after selection. The frozen sample contains 51 Release 18, 44 Release
 17, three Release 14, one Release 16, and one Release 19 question. It remains a
 development sample; the separate 452-question held-out set is unchanged.
+
+## Supplemental databases
+
+A registry entry may be a single database path or a list, for example
+`{"3gpp-r17": ["3gpp-r17.sqlite", "3gpp-r17-supplement.sqlite"]}`. Searches
+apply the requested corpus and release to every part, then fuse the rankings.
+Each part retains its own provenance manifest. This permits adding the omitted
+original standards without modifying the databases used by the first baselines.
+Duplicate database paths are rejected; conflicting chunk IDs remain errors.
