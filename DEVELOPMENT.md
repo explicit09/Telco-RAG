@@ -128,3 +128,18 @@ Runs archive their source code and checkpoint predictions after each question.
 `--resume` accepts only matching configuration and prediction hashes, and skips
 completed questions. An interruption between prediction and manifest writes
 fails closed and requires checkpoint reconciliation rather than silent reuse.
+
+## Question-overlap screen
+
+A question-only lexical screen (word-set Jaccard at least 0.85, excluding release
+annotations) flagged two cross-release dev/test pairs. The development members,
+`question 4440` and `question 5341`, had not appeared in any model run and were
+quarantined from future development. Protocol v3 has 1,054 development questions
+and the same 452 held-out questions. Held-out question and answer files are
+byte-for-byte identical to v2. The ongoing first-20 development run is unaffected.
+
+`tools/audit_question_overlap.py` performs the question-only screen;
+`tools/quarantine_overlap.py` refuses to quarantine an already-used development
+candidate and preserves held-out files. The repeated lexical screen found zero
+remaining cross-split candidates. This is not proof that every semantic
+near-duplicate or pretraining exposure is absent.
