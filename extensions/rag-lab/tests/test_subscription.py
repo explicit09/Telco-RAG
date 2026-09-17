@@ -16,6 +16,9 @@ class SubscriptionTests(unittest.TestCase):
         def run(command, **kwargs):
             self.assertNotIn('OPENAI_API_KEY', kwargs['env'])
             self.assertIn('--ignore-user-config', command)
+            schema_path = Path(command[command.index('--output-schema') + 1])
+            schema = json.loads(schema_path.read_text())
+            self.assertEqual(schema['properties']['selected_option']['enum'], ['A', None])
             output = Path(command[command.index('--output-last-message') + 1])
             output.write_text(json.dumps(dict(text='30 seconds', selected_option='A', abstained=False,
                 citations=['c'], quotes=[dict(chunk_id='c',quote='30 seconds')],next_search=None)))

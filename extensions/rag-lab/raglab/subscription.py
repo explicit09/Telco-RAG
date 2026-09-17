@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from .generation import ANSWER_SCHEMA, make_payload, parse_answer
+from .generation import make_payload, parse_answer
 
 
 class SubscriptionGenerator:
@@ -44,7 +44,7 @@ class SubscriptionGenerator:
         with tempfile.TemporaryDirectory(prefix='raglab-dev-') as folder:
             folder = Path(folder)
             schema, output = folder / 'schema.json', folder / 'answer.json'
-            schema.write_text(json.dumps(ANSWER_SCHEMA))
+            schema.write_text(json.dumps(payload["text"]["format"]["schema"]))
             command = [self.executable, 'exec', '--ignore-user-config', '--ephemeral', '--json',
                        '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder),
                        '--output-schema', str(schema), '--output-last-message', str(output)]

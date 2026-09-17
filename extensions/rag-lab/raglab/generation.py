@@ -1,6 +1,7 @@
 """No paid calls by default. Model inputs contain questions and evidence, never gold."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import urllib.error
@@ -37,6 +38,8 @@ ANSWER_SCHEMA = {
 
 
 def make_payload(question: Question, evidence: Sequence[Evidence], *, model: str, max_output_tokens: int) -> dict:
+    schema = copy.deepcopy(ANSWER_SCHEMA)
+    schema["properties"]["selected_option"]["enum"] = [*question.options, None]
     return {
         "model": model, "store": False, "max_output_tokens": max_output_tokens,
         "input": [
@@ -52,7 +55,7 @@ def make_payload(question: Question, evidence: Sequence[Evidence], *, model: str
             {"role": "user", "content": json.dumps({"question": asdict(question),
                 "evidence": [e.to_dict() for e in evidence]}, ensure_ascii=False)},
         ],
-        "text": {"format": {"type": "json_schema", "name": "grounded_answer", "strict": True, "schema": ANSWER_SCHEMA}},
+        "text": {"format": {"type": "json_schema", "name": "grounded_answer", "strict": True, "schema": schema}},
     }
 
 
