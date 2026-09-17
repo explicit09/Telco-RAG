@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Protocol, Sequence
 
 from .models import Chunk, Evidence, SearchStore
@@ -48,8 +49,9 @@ def fuse_rankings(rankings: Sequence[Sequence[Evidence]], *, k: int = 60) -> lis
 
 class Retriever:
     def __init__(self, store: SearchStore, *, embedder: Embedder | None = None,
-                 reranker: Reranker | None = None):
+                 reranker: Reranker | None = None, phrase_search: bool = False):
         self.store, self.embedder, self.reranker = store, embedder, reranker
+        self.phrase_search = phrase_search
         self._vectors: dict[tuple[str, str, str], list[float]] = {}
 
     def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None,
@@ -58,6 +60,21 @@ class Retriever:
             raise ValueError("Search requires text, explicit corpora, and candidates >= limit > 0")
         lexical = self.store.search(query, corpus_ids=corpus_ids, release=release, limit=candidates)
         rankings = [lexical]
+        if self.phrase_search:
+            phrases = {}
+            for raw in re.findall(r'"([^\"]+)"', query):
+                words = re.findall(r'\w+', raw)
+                phrase = ' '.join(words)
+                if len(words) >= 2 and len(phrase) <= 200:
+                    phrases.setdefault(phrase.casefold(), phrase)
+            # Reserve candidate coverage for named phrases instead of letting
+            # common surrounding words crowd them out of the lexical pool.
+            for phrase in list(phrases.values())[:2]:
+                focused = '"' + phrase + '"'
+                if focused.casefold() == query.strip().casefold():
+                    continue
+                matches = self.store.search(focused, corpus_ids=corpus_ids, release=release, limit=candidates)
+                rankings.append([Evidence(item.chunk, item.score, 'phrase') for item in matches])
         if self.embedder is not None:
             # Reference exact dense scan for experiments; replace at the store seam for large corpora.
             chunks = self.store.chunks(corpus_ids, release=release)

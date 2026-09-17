@@ -57,6 +57,7 @@ def main():
     p.add_argument('--deny-read-root', action='append', type=Path, default=[])
     p.add_argument('--top-k', type=int, default=8)
     p.add_argument('--reranker', type=Path)
+    p.add_argument('--phrase-search', action='store_true')
     a = p.parse_args()
     if a.questions.name != 'dev.questions.jsonl':
         raise ValueError('Only dev.questions.jsonl is accepted; this runner is not held-out isolated')
@@ -93,6 +94,7 @@ def main():
         'code_sha256': {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in code_files},
         'status': 'running',
         'reranker': reranker.provenance if reranker else None,
+        'phrase_search': a.phrase_search,
     }
     manifest_path = a.output.with_suffix('.manifest.json')
     previous_requests = 0
@@ -110,7 +112,7 @@ def main():
         run_manifest['predictions_sha256'] = hashlib.sha256(a.output.read_bytes()).hexdigest()
     atomic_json(manifest_path, run_manifest)
     with store_provider as store:
-        search_provider = Retriever(store, reranker=reranker) if reranker else store
+        search_provider = Retriever(store, reranker=reranker, phrase_search=a.phrase_search) if reranker or a.phrase_search else store
         for question in questions:
             if question.id in predictions:
                 continue

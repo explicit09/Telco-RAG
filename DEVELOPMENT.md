@@ -217,3 +217,15 @@ candidate original files reduce to 111 files for 57 missing numbered specificati
 148 attachments or already-covered files are excluded. A malformed non-numbered
 attachment stopped the first attempt; that incomplete index is not registered.
 This corpus correction does not alter benchmark membership or reference answers.
+
+`--phrase-search` optionally adds at most two focused searches for distinct quoted
+multiword phrases, using the same corpus and release filters. Their candidate
+lists are fused with normal lexical retrieval before reranking. This recovered
+the bearer-control definition as the top passage for one documented development
+miss without loading the answer key. It is not an accuracy result.
+
+The subsequent first-20 run, with the Release 17 supplement and one follow-up
+search, scored 14/20 (70%), with two abstentions and no execution failures. It
+gained three correct answers and regressed on one versus the earlier 60% run.
+Corpus and retrieval behavior changed together; this is a combined development
+result, not an isolated causal estimate. The 100-question sample is still pending.
