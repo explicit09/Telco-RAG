@@ -4,6 +4,13 @@ from pathlib import Path
 from inventory_mirror import REVISION
 
 
+def specification_id(path):
+    match = re.match(r'^(\d{2})\.?([0-9]{3})(?:-([0-9]{2})(?=-[a-z0-9]{3}(?:[_.-]|$)))?', Path(path).name, re.I)
+    if not match:
+        return None
+    return match[1] + match[2] + ('-' + match[3] if match[3] else '')
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('parsed_inventory',type=Path)
@@ -17,7 +24,7 @@ def main():
         if a.docx_manifest:
             if len(a.releases)!=1:raise ValueError('DOCX comparison requires one explicit release')
             parsed=json.loads(a.docx_manifest.read_text())
-            specs={Path(row['path']).stem.rsplit('-',1)[0] for row in parsed['files']}
+            specs={specification_id(row['path']) for row in parsed['files']}
         else:
             parsed=json.loads((a.parsed_inventory/f'release-{release}.json').read_text())
             if parsed['revision']!=REVISION:raise ValueError('mismatched mirror revision')
@@ -34,10 +41,10 @@ def main():
             url=next_links[0] if next_links else None
             if url and not url.startswith('https://huggingface.co/api/datasets/GSMA/3GPP/tree/'):
                 raise ValueError('unexpected pagination origin')
-        gaps=[row for row in files if Path(row['path']).stem.rsplit('-',1)[0] not in specs]
+        gaps=[row for row in files if specification_id(row['path']) is not None and specification_id(row['path']) not in specs]
         result={'repository':'GSMA/3GPP','revision':REVISION,'release':release,'files':gaps,
                 'comparison_repository':parsed['repository'],'comparison_revision':parsed['revision'],
-                'method':'Original filename specification prefix missing from existing DOCX prefixes or parsed raw.md parent directory names.'}
+                'method':'Canonical numbered specification absent from existing inventory; non-numbered attachments excluded, split files share their specification ID.'}
         (a.output/f'release-{release}.json').write_text(json.dumps(result,indent=2)+'\n')
         record={'release':release,'original_files':len(files),'parsed_specs':len(specs),'missing_files':len(gaps),'missing_bytes':sum(row['size'] for row in gaps),'extensions':sorted({Path(row['path']).suffix for row in gaps})}
         summary.append(record);print(json.dumps(record),flush=True)

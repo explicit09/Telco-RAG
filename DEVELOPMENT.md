@@ -199,3 +199,21 @@ apply the requested corpus and release to every part, then fuse the rankings.
 Each part retains its own provenance manifest. This permits adding the omitted
 original standards without modifying the databases used by the first baselines.
 Duplicate database paths are rejected; conflicting chunk IDs remain errors.
+
+## Bounded follow-up retrieval
+
+The development runner accepts `--followups 0|1|2` (default 0) and up to 100
+explicitly requested development questions. After an abstention with a proposed
+search, it can retrieve fresh evidence within the same corpus/release and retry.
+Repeated queries and searches yielding no new evidence stop without another
+model call. Every answering round records its evidence and answer. Request limits
+include the original candidate-generation call and all allowed follow-ups.
+
+The original-file audit initially overcounted split filenames and non-numbered
+attachments as missing specifications. Canonical specification IDs now group
+split sections and identify already-covered specifications. The supplemental
+manifest lists every exclusion and its source-only reason. Release 17's 259
+candidate original files reduce to 111 files for 57 missing numbered specifications;
+148 attachments or already-covered files are excluded. A malformed non-numbered
+attachment stopped the first attempt; that incomplete index is not registered.
+This corpus correction does not alter benchmark membership or reference answers.

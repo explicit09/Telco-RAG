@@ -22,6 +22,7 @@ from raglab.store import SQLiteStore
 from raglab.registry import CorpusRegistry
 from raglab.retrieval import Retriever
 from raglab.subscription import SubscriptionGenerator
+from raglab.followup import answer_with_followup
 
 
 def atomic_json(path, data):
@@ -49,6 +50,7 @@ def main():
     p.add_argument('database', type=Path)
     p.add_argument('output', type=Path)
     p.add_argument('--limit', type=int, default=3)
+    p.add_argument('--followups', type=int, choices=(0, 1, 2), default=0)
     p.add_argument('--resume', action='store_true')
     p.add_argument('--model', required=True)
     p.add_argument('--codex', default='codex')
@@ -58,8 +60,8 @@ def main():
     a = p.parse_args()
     if a.questions.name != 'dev.questions.jsonl':
         raise ValueError('Only dev.questions.jsonl is accepted; this runner is not held-out isolated')
-    if not 1 <= a.limit <= 20 or not 1 <= a.top_k <= 12:
-        raise ValueError('development limits: 1..20 questions, 1..12 passages')
+    if not 1 <= a.limit <= 100 or not 1 <= a.top_k <= 12:
+        raise ValueError('development limits: 1..100 questions, 1..12 passages')
     if a.output.exists() and not a.resume:
         raise FileExistsError('refusing to overwrite run')
     questions = load_questions(a.questions)[:a.limit]
@@ -68,7 +70,7 @@ def main():
         from raglab.reranking import ONNXReranker
         reranker = ONNXReranker(a.reranker)
     predictions = {}
-    generator = SubscriptionGenerator(model=a.model, max_requests=2 * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root)
+    generator = SubscriptionGenerator(model=a.model, max_requests=(2 + a.followups) * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     if a.database.suffix == '.json':
         store_provider = CorpusRegistry(a.database)
@@ -81,7 +83,7 @@ def main():
         store_provider = SQLiteStore(a.database)
     code_files = sorted((ROOT / 'extensions/rag-lab/raglab').glob('*.py')) + [ROOT / 'Telco-RAG_api/src/query.py', ROOT / 'Telco-RAG_api/src/corpus.py', Path(__file__)]
     run_manifest = {
-        'development_only': True, 'model': a.model, 'top_k': a.top_k,
+        'development_only': True, 'model': a.model, 'top_k': a.top_k, 'followups': a.followups,
         'codex_executable': shutil.which(a.codex),
         'os_denied_roots': [str(path.resolve()) for path in a.deny_read_root],
         'codex_version': subprocess.run([a.codex, '--version'], capture_output=True, text=True, check=True).stdout.strip(),
@@ -136,7 +138,8 @@ def main():
                 evidence = evidence_for_flow()
                 if not evidence:
                     raise ValueError('no evidence retrieved')
-                answer = generator.generate(question, evidence)
+                answer = answer_with_followup(question, evidence, generator, search_provider, limit=a.top_k,
+                                              max_followups=a.followups, initial_query=flow.enhanced_query)
                 predictions[question.id] = answer.to_dict()
             except Exception as exc:
                 predictions[question.id] = {'question_id': question.id, 'selected_option': None, 'abstained': False, 'failed': True, 'error': str(exc), 'development_only': True}
