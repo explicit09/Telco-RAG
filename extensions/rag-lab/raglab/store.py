@@ -58,22 +58,25 @@ class SQLiteStore:
                 self.db.execute("INSERT INTO chunks_fts VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (chunk.id, chunk.corpus_id, chunk.document_id, chunk.source, chunk.title, chunk.section, chunk.text, chunk.release))
 
     @staticmethod
-    def _query(query: str) -> str:
+    def _query(query: str, match_mode: str = "any") -> str:
+        if match_mode not in ("any", "all"):
+            raise ValueError("match_mode must be any or all")
         terms = []
         for phrase, word in re.findall(r'"([^\"]*)"|([\w]+)', query, re.UNICODE):
             tokens = re.findall(r"[\w]+", phrase or word, re.UNICODE)
             if tokens:
                 terms.append('"' + " ".join(tokens) + '"')
-        return " OR ".join(terms)
+        return (" AND " if match_mode == "all" else " OR ").join(terms)
 
-    def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None, limit: int = 10) -> list[Evidence]:
+    def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None, limit: int = 10, match_mode: str = "any") -> list[Evidence]:
         corpora = list(corpus_ids)
         if not corpora:
             raise ValueError("corpus_ids must be non-empty")
-        if limit <= 0 or not self._query(query):
+        compiled_query = self._query(query, match_mode)
+        if limit <= 0 or not compiled_query:
             return []
         marks = ",".join("?" for _ in corpora)
-        args: list[object] = [self._query(query), *corpora]
+        args: list[object] = [compiled_query, *corpora]
         sql = f"SELECT id, rank FROM chunks_fts WHERE chunks_fts MATCH ? AND corpus_id IN ({marks})"
         if release is not None:
             sql += " AND release = ?"

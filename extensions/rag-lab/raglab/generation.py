@@ -169,3 +169,36 @@ def parse_read_answer(question, evidence, data, trace=None):
             raise ValueError('document read requires abstention and no simultaneous search')
     answer = parse_answer(question, evidence, {k:v for k,v in data.items() if k != 'next_read'}, trace)
     return replace(answer, trace={**answer.trace, 'next_read':request})
+
+
+def make_search_payload(question, evidence, *, model, max_output_tokens, allow_document_reads=False):
+    factory = make_read_payload if allow_document_reads else make_payload
+    payload = factory(question, evidence, model=model, max_output_tokens=max_output_tokens)
+    schema = payload['text']['format']['schema']
+    schema['properties']['next_search_mode'] = {'type': ['string', 'null'], 'enum': ['any', 'all', None]}
+    schema['required'].append('next_search_mode')
+    payload['input'][0]['content'] += (
+        ' For a next_search, set next_search_mode to any (matching any query term or quoted phrase) '
+        'or all (requiring every query term and quoted phrase in a matching passage). '
+        'Use short all-mode queries to require a key condition and topic together; do not include '
+        'corpus or release names in the query because those filters are applied separately. '
+        'Boolean words typed in the query are literal search terms, not operators. '
+        'Set next_search_mode=null when not requesting a search. Do not combine a search with a document read.')
+    return payload
+
+
+def parse_search_answer(question, evidence, data, trace=None, *, allow_document_reads=False):
+    from dataclasses import replace
+    if 'next_search_mode' not in data:
+        raise ValueError('missing search mode')
+    mode = data['next_search_mode']
+    if mode is not None and (not isinstance(mode, str) or mode not in ('any', 'all')):
+        raise ValueError('invalid search mode')
+    if data.get('next_search') is None:
+        if mode is not None:
+            raise ValueError('search mode without a search')
+    elif mode is None or data.get('abstained') is not True:
+        raise ValueError('search requires a mode and abstention')
+    parser = parse_read_answer if allow_document_reads else parse_answer
+    answer = parser(question, evidence, {k:v for k,v in data.items() if k != 'next_search_mode'}, trace)
+    return replace(answer, trace={**answer.trace, 'next_search_mode': mode})

@@ -3,7 +3,7 @@ from dataclasses import replace
 from .generation import validate_read_request
 
 
-def answer_with_followup(question, evidence, generator, store, *, limit=8, max_followups=1, initial_query=None, allow_document_reads=False):
+def answer_with_followup(question, evidence, generator, store, *, limit=8, max_followups=1, initial_query=None, allow_document_reads=False, allow_search_modes=False):
     if not 0 <= max_followups <= 2 or limit < 1:
         raise ValueError('invalid follow-up limits')
 
@@ -16,7 +16,7 @@ def answer_with_followup(question, evidence, generator, store, *, limit=8, max_f
     evidence = list(evidence)
     validate(evidence)
     rounds = []
-    seen_queries = {' '.join(question.text.casefold().split())}
+    seen_queries = {('any', ' '.join(question.text.casefold().split()))}
     query = initial_query or question.text
     searches = 0
     reads = 0
@@ -44,11 +44,15 @@ def answer_with_followup(question, evidence, generator, store, *, limit=8, max_f
         else:
             if not isinstance(query, str) or not query.strip():
                 break
-            normalized = ' '.join(query.casefold().split())
+            mode = answer.trace.get('next_search_mode') or 'any'
+            if mode not in ('any', 'all') or (mode == 'all' and not allow_search_modes):
+                raise ValueError('invalid or disabled search mode')
+            normalized = (mode, ' '.join(query.casefold().split()))
             if normalized in seen_queries:
                 break
             seen_queries.add(normalized)
-            fresh = list(store.search(query, corpus_ids=question.corpus_ids, release=question.release, limit=limit))
+            options = {"match_mode": "all"} if mode == "all" else {}
+            fresh = list(store.search(query, corpus_ids=question.corpus_ids, release=question.release, limit=limit, **options))
             searches += 1
         validate(fresh)
         previous = {item.chunk.id:item.chunk for item in evidence}

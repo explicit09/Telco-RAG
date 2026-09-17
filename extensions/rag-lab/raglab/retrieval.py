@@ -66,12 +66,15 @@ class Retriever:
                                       before=before, after=after, limit=limit, max_chars=max_chars)
 
     def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None,
-               limit: int = 8, candidates: int = 40) -> list[Evidence]:
+               limit: int = 8, candidates: int = 40, match_mode: str = "any") -> list[Evidence]:
+        if match_mode not in ("any", "all"):
+            raise ValueError("match_mode must be any or all")
         if not query.strip() or not corpus_ids or limit < 1 or candidates < limit:
             raise ValueError("Search requires text, explicit corpora, and candidates >= limit > 0")
-        lexical = self.store.search(query, corpus_ids=corpus_ids, release=release, limit=candidates)
+        search_options = {"match_mode": "all"} if match_mode == "all" else {}
+        lexical = self.store.search(query, corpus_ids=corpus_ids, release=release, limit=candidates, **search_options)
         rankings = [lexical]
-        if self.phrase_search:
+        if self.phrase_search and match_mode == "any":
             phrases = {}
             for raw in re.findall(r'"([^\"]+)"', query):
                 words = re.findall(r'\w+', raw)
@@ -86,7 +89,7 @@ class Retriever:
                     continue
                 matches = self.store.search(focused, corpus_ids=corpus_ids, release=release, limit=candidates)
                 rankings.append([Evidence(item.chunk, item.score, 'phrase') for item in matches])
-        if self.embedder is not None:
+        if self.embedder is not None and match_mode == "any":
             # Reference exact dense scan for experiments; replace at the store seam for large corpora.
             chunks = self.store.chunks(corpus_ids, release=release)
             missing = [c for c in chunks if (self.embedder.model_id, c.id, c.text) not in self._vectors]

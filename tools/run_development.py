@@ -60,6 +60,7 @@ def main():
     p.add_argument('--phrase-search', action='store_true')
     p.add_argument('--document-reads', action='store_true', help='Allow bounded same-section reads within the follow-up budget')
     p.add_argument('--rerank-strategy', choices=('replace', 'interleave'), default='replace')
+    p.add_argument('--search-modes', action='store_true', help='Allow explicit any/all term matching in follow-up searches')
     a = p.parse_args()
     if a.questions.name != 'dev.questions.jsonl':
         raise ValueError('Only dev.questions.jsonl is accepted; this runner is not held-out isolated')
@@ -73,7 +74,7 @@ def main():
         from raglab.reranking import ONNXReranker
         reranker = ONNXReranker(a.reranker)
     predictions = {}
-    generator = SubscriptionGenerator(model=a.model, max_requests=(2 + a.followups) * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root, allow_document_reads=a.document_reads)
+    generator = SubscriptionGenerator(model=a.model, max_requests=(2 + a.followups) * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root, allow_document_reads=a.document_reads, allow_search_modes=a.search_modes)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     if a.database.suffix == '.json':
         store_provider = CorpusRegistry(a.database)
@@ -98,6 +99,7 @@ def main():
         'reranker': reranker.provenance if reranker else None,
         'phrase_search': a.phrase_search,
         'document_reads': a.document_reads,
+        'search_modes': a.search_modes,
         'rerank_strategy': a.rerank_strategy,
     }
     manifest_path = a.output.with_suffix('.manifest.json')
@@ -146,7 +148,7 @@ def main():
                     raise ValueError('no evidence retrieved')
                 answer = answer_with_followup(question, evidence, generator, search_provider, limit=a.top_k,
                                               max_followups=a.followups, initial_query=flow.enhanced_query,
-                                              allow_document_reads=a.document_reads)
+                                              allow_document_reads=a.document_reads, allow_search_modes=a.search_modes)
                 predictions[question.id] = answer.to_dict()
             except Exception as exc:
                 predictions[question.id] = {'question_id': question.id, 'selected_option': None, 'abstained': False, 'failed': True, 'error': str(exc), 'development_only': True}

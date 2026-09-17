@@ -266,3 +266,20 @@ fractions and delimiters) and equation-only paragraphs. Unsupported structures
 are marked explicitly. Existing indexes retain their original parser output;
 rebuild into a separate versioned database to evaluate this change. This is not
 a complete mathematical-layout renderer.
+
+## Explicit conjunctive search experiment
+
+`SQLiteStore.search`, `CorpusRegistry.search` and `Retriever.search` accept
+`match_mode="any"|"all"`, defaulting to `any`. All-mode requires each normalized
+term or quoted phrase; query text never executes arbitrary FTS operators. Corpus
+and release filters still apply. Phrase-only and dense expansion are disabled in
+all-mode so they cannot add passages outside those constraints.
+
+The development runner's opt-in `--search-modes` exposes this choice through
+`next_search_mode`. Search requests still share the same follow-up and model-call
+budgets. On one development QoS query chosen during diagnosis, all-mode retrieved
+the direct rule at rank 6 while any-mode missed it in the top eight. An autonomous
+one-question diagnostic chose an overly strict all-mode query, found no new
+passages and abstained. This is not an accuracy improvement. The current loop
+stops on no-new-evidence results; feedback-driven query relaxation remains work
+to evaluate.

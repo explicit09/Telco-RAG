@@ -38,12 +38,14 @@ class CorpusRegistry:
             self.active_corpora.setdefault(database, set()).add(corpus)
             yield self.stores[database]
 
-    def search(self, query, *, corpus_ids, release=None, limit=10):
+    def search(self, query, *, corpus_ids, release=None, limit=10, match_mode="any"):
+        if match_mode not in ("any", "all"):
+            raise ValueError("match_mode must be any or all")
         if not corpus_ids:
             raise ValueError('corpus_ids must be non-empty')
         if limit <= 0:
             return []
-        rankings = [store.search(query, corpus_ids=[corpus], release=release, limit=limit)
+        rankings = [store.search(query, corpus_ids=[corpus], release=release, limit=limit, match_mode=match_mode)
                     for corpus in dict.fromkeys(corpus_ids) for store in self._stores_for(corpus)]
         return fuse_rankings(rankings)[:limit]
 
