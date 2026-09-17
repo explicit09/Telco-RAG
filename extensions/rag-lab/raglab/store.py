@@ -59,7 +59,12 @@ class SQLiteStore:
 
     @staticmethod
     def _query(query: str) -> str:
-        return " OR ".join('"' + token.replace('"', '""') + '"' for token in re.findall(r"[\w]+", query, re.UNICODE))
+        terms = []
+        for phrase, word in re.findall(r'"([^\"]*)"|([\w]+)', query, re.UNICODE):
+            tokens = re.findall(r"[\w]+", phrase or word, re.UNICODE)
+            if tokens:
+                terms.append('"' + " ".join(tokens) + '"')
+        return " OR ".join(terms)
 
     def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None, limit: int = 10) -> list[Evidence]:
         corpora = list(corpus_ids)
@@ -69,13 +74,32 @@ class SQLiteStore:
             return []
         marks = ",".join("?" for _ in corpora)
         args: list[object] = [self._query(query), *corpora]
-        release_sql = ""
+        sql = f"SELECT id, rank FROM chunks_fts WHERE chunks_fts MATCH ? AND corpus_id IN ({marks})"
         if release is not None:
-            release_sql = " AND c.release = ?"
+            sql += " AND release = ?"
             args.append(release)
-        args.append(limit)
-        rows = self.db.execute(f"SELECT c.*, bm25(chunks_fts) AS rank FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.id WHERE chunks_fts MATCH ? AND c.corpus_id IN ({marks}){release_sql} ORDER BY rank, c.id LIMIT ?", args).fetchall()
-        return [Evidence(Chunk(r["id"], r["corpus_id"], r["document_id"], r["source"], r["title"], r["section"], r["text"], r["release"], json.loads(r["metadata"])), score=-float(r["rank"])) for r in rows]
+        sql += " ORDER BY rank"
+        # FTS5 streams by rank. Include the whole cutoff tie, then sort IDs to
+        # preserve the exhaustive query's deterministic order without a full join.
+        ranked = []
+        cutoff = None
+        cursor = self.db.execute(sql, args)
+        try:
+            for row in cursor:
+                if cutoff is not None and row["rank"] > cutoff:
+                    break
+                ranked.append((row["id"], float(row["rank"])))
+                if len(ranked) == limit:
+                    cutoff = row["rank"]
+        finally:
+            cursor.close()
+        result = []
+        for identifier, rank in sorted(ranked, key=lambda item: (item[1], item[0]))[:limit]:
+            chunk = self.get_chunk(identifier)
+            if chunk is None or chunk.corpus_id not in corpora or (release is not None and chunk.release != release):
+                raise ValueError("search index and chunk metadata disagree")
+            result.append(Evidence(chunk, score=-rank))
+        return result
 
     def get_chunk(self, chunk_id: str) -> Chunk | None:
         r = self.db.execute("SELECT * FROM chunks WHERE id = ?", (chunk_id,)).fetchone()

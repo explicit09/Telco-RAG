@@ -159,12 +159,34 @@ checks matching model, code, question IDs, corpus provenance, and execution sett
 then reports paired improvements/regressions. Indexing durations are excluded from
 the corpus comparison. These reports explicitly do not establish goal achievement.
 
-`tools/prototype_rank_stream.py` is an isolated optimization experiment, not yet
-used by the evaluation runner. It streams SQLite's ranked matches, includes all
+`tools/prototype_rank_stream.py` preserves the initial optimization experiment.
+The tested streaming implementation is now integrated into the store. It streams SQLite's ranked matches, includes all
 ties at the cutoff, and sorts tied IDs deterministically. Synthetic scope/tie tests
 and one development query from each of the five releases returned exactly the same
 top 40 IDs and scores as the existing search. Observed streaming times were about
 2.4–5.9 seconds versus 11.7–100.8 seconds for the exhaustive query. These are small,
 uncontrolled timing diagnostics with possible cache and concurrent-job effects,
-not a general performance guarantee. The running lexical and reranked comparisons
-retain their original search implementation.
+not a general performance guarantee. The completed lexical and reranked comparisons
+used the original search implementation; their archived sources remain available.
+Quoted phrases are now preserved as phrases rather than split into OR terms.
+
+## Completed first-20 comparison and corpus coverage repair
+
+On the same 20 development questions with `gpt-6-astra`, the lexical baseline
+scored 9/20 (45%, eight abstentions) and the reranked variant scored 12/20
+(60%, five abstentions). Neither had execution failures. Nine questions were
+correct in both, three improved, and none regressed. This small development
+comparison does not establish a held-out result or causal proof of a reranking gain.
+
+The parsed GSMA inventories omit some original specifications, including Release
+17 TS 22.261 and TS 23.501. Inventory completeness is therefore not standards
+coverage completeness. `tools/inventory_original_gaps.py` compares original
+filenames against parsed document directories or an existing DOCX manifest.
+An all-release audit identified omitted originals; download and ingestion of those
+files is underway. Existing baseline indexes are preserved for comparison.
+
+`tools/freeze_development_sample.py` selects 100 previously unused development
+questions by seeded ID hashes, reserves at least one per release, and copies
+labels only after selection. The frozen sample contains 51 Release 18, 44 Release
+17, three Release 14, one Release 16, and one Release 19 question. It remains a
+development sample; the separate 452-question held-out set is unchanged.
