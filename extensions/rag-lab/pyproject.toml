@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raglab"
+version = "0.1.0"
+description = "Corpus-independent RAG experiments with explicit provenance and held-out evaluation"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+raglab = "raglab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["raglab*"]

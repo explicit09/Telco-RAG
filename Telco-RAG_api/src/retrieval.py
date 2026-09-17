@@ -20,7 +20,7 @@ def search_faiss_index(faiss_index, query_embedding, k=5):
 def get_query_embedding_OpenAILarge(query_text, context=None):
     try:
         if context is not None:
-            query_text = f'{query_text}\n' + "\n".join(context)
+            query_text = f'{query_text}\n' + (context if isinstance(context, str) else "\n".join(context))
 
         response = embedding(query_text)
         query_embedding =  response.data[0].embedding  
@@ -38,7 +38,7 @@ def find_nearest_neighbors_faiss(query_text, faiss_index, data_mapping, k, sourc
 
         nearest_neighbors = []
         for index in I[0]:  
-            if index < len(data_mapping):  
+            if 0 <= index < len(data_mapping):
                 data = data_mapping.get(index, "Data not found")
                 source = source_mapping.get(index, "Source not found")
                 embedding = embedding_mapping.get(index, "Data not found")

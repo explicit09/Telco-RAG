@@ -1,30 +1,23 @@
 import os
 import json
-import numpy as np
-import torch
 import traceback
-from tqdm.auto import tqdm
-from torch.utils.data import DataLoader, TensorDataset
-from src.retrieval import find_nearest_neighbors_faiss
-from src.index import get_faiss_batch_index
-from src.online_retrieval.pdf_reader import fetch_snippets_and_search
-from src.embeddings import get_embeddings
-from src.get_definitions import define_TA_question
-from src.input import get_documents
-from src.chunking import chunk_doc
-from src.LLMs.LLM import submit_prompt_flex, a_submit_prompt_flex, embedding
-from src.validator import validator_RAG
-from src.NNRouter import NNRouter
-from api.LLM import a_submit_prompt_flex_UI, submit_prompt_flex_UI
 
 class Query:
-    def __init__(self, query, context):
+    def __init__(self, query, context, *, corpus=None, completion=None, validator=None):
         self.question = query
         self.query = query 
         self.enhanced_query = query
         self.context = [context] if isinstance(context, str) else context
         self.context_source = []
         self.wg = []
+        self.completion = completion
+        self.validator = validator
+        self.corpus = corpus
+        if corpus is not None:
+            return
+        import numpy as np
+        import torch
+        from src.NNRouter import NNRouter
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = NNRouter()
         self.model.load_state_dict(torch.load(r'.\\src\\resources\\router_new.pth', map_location='cpu'))
@@ -33,6 +26,7 @@ class Query:
         self.original_labels_mapping = np.arange(21, 39)
 
     def def_TA_question(self):
+        from src.get_definitions import define_TA_question
         self.query = define_TA_question(self.query)
         self.enhanced_query = self.query
 
@@ -47,16 +41,26 @@ class Query:
             Question: {self.question}
             Ensure none of the answers provided contradicts your knowledge and each answer has at most 100 characters.
             """
-            generated_output_str = submit_prompt_flex_UI(row_context, model=model_name) if UI_flag else submit_prompt_flex(row_context, model=model_name)
+            if self.completion is not None:
+                generated_output_str = self.completion(row_context, model=model_name)
+            elif UI_flag:
+                from api.LLM import submit_prompt_flex_UI
+                generated_output_str = submit_prompt_flex_UI(row_context, model=model_name)
+            else:
+                from src.LLMs.LLM import submit_prompt_flex
+                generated_output_str = submit_prompt_flex(row_context, model=model_name)
             if generated_output_str != "NO": 
-                self.context = generated_output_str 
+                self.context = [generated_output_str]
                 print(self.context)
-                self.enhanced_query = self.query + '\n' + self.context
+                self.enhanced_query = self.query + '\n' + generated_output_str
         except Exception as e:
+            if self.completion is not None:
+                raise
             print(f"An error occurred: {e}")
 
     @staticmethod
     def get_embeddings_list(text_list):
+        from src.LLMs.LLM import embedding
         response = embedding(text_list)
         embeddings = [item.embedding for item in response.data]
         return dict(zip(text_list, embeddings))
@@ -104,6 +108,9 @@ class Query:
     
     @staticmethod
     def preprocessing_softmax(embeddings_list):
+        import numpy as np
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
         embeddings = np.array(embeddings_list)
         similarity = np.array(Query.get_col2(embeddings))
         X_train_1_tensor = torch.tensor(embeddings, dtype=torch.float32)
@@ -113,10 +120,12 @@ class Query:
     
     @staticmethod
     def get_embeddings(text):
+        from src.LLMs.LLM import embedding
         response = embedding(text)
         return response.data[0].embedding
 
     def predict_wg(self):
+        import torch
         text_embeddings = Query.get_embeddings_list([self.enhanced_query])
         embeddings = text_embeddings[self.enhanced_query]
         test_dataloader = Query.preprocessing_softmax([embeddings])
@@ -131,6 +140,8 @@ class Query:
         self.wg = label_list[0]
         
     def get_question_context_faiss(self, batch, k, use_context=False):
+        from src.retrieval import find_nearest_neighbors_faiss
+        from src.index import get_faiss_batch_index
         try:
             faiss_index, faiss_index_to_data_mapping, source_mapping, embedding_mapping = get_faiss_batch_index(batch)
             result = find_nearest_neighbors_faiss(self.query, faiss_index, faiss_index_to_data_mapping, k, source_mapping=source_mapping, embedding_mapping=embedding_mapping, context=self.context if use_context else None)
@@ -145,9 +156,38 @@ class Query:
             self.context = "Error in processing"
     
     def validate_context(self, model_name='gpt-4o-mini', k=10, UI_flag=True):
-        self.context = validator_RAG(self.question, self.context, model_name=model_name, k=k, UI_flag=UI_flag)
+        if self.validator is not None:
+            self.context = self.validator(self.question, self.context, model_name=model_name, k=k)
+        else:
+            from src.validator import validator_RAG
+            self.context = validator_RAG(self.question, self.context, model_name=model_name, k=k, UI_flag=UI_flag)
         
+    def get_corpus_context(self, k=10, model_name='gpt-4o-mini', validate_flag=True, UI_flag=False):
+        """Use the existing candidate/validator stages with an injected corpus."""
+        if self.corpus is None:
+            raise ValueError("no corpus provider configured")
+        if k <= 0:
+            raise ValueError("k must be positive")
+
+        def retrieve(query, limit):
+            passages = self.corpus.search(query, limit=limit)
+            self.context = [f"{p.text}\nSource: {p.source}; passage: {p.id}" for p in passages]
+            self.context_source = [p.id for p in passages]
+
+        retrieve(self.query, k)
+        if not self.context:
+            return
+        self.candidate_answers(model_name=model_name, UI_flag=UI_flag)
+        retrieve(self.enhanced_query, 2 * k if validate_flag else k)
+        if validate_flag and self.context:
+            self.validate_context(model_name=model_name, k=k, UI_flag=UI_flag)
+
     def get_3GPP_context(self, k=10, model_name='gpt-4o-mini', validate_flag=True, UI_flag=False):
+        if self.corpus is not None:
+            return self.get_corpus_context(k=k, model_name=model_name, validate_flag=validate_flag, UI_flag=UI_flag)
+        from src.input import get_documents
+        from src.chunking import chunk_doc
+        from src.embeddings import get_embeddings
         self.predict_wg()
         document_ds = get_documents(self.wg)
         Document_ds = [chunk_doc(doc) for doc in document_ds]
@@ -161,9 +201,11 @@ class Query:
         self.get_question_context_faiss(batch=embedded_docs, k=10, use_context=False)
         self.candidate_answers(model_name=model_name, UI_flag=UI_flag)
 
-        old_list = self.wg
+        old_list = list(self.wg)
         self.predict_wg()
-        new_series = {f'Series{series_number}': [doc for doc in Document_ds if doc[0]['source'][:2].isnumeric() and int(doc[0]['source'][:2]) == series_number] for series_number in self.wg if series_number not in old_list}
+        added_series = [number for number in self.wg if number not in old_list]
+        added_documents = [chunk_doc(doc) for doc in get_documents(added_series)] if added_series else []
+        new_series = {f'Series{series_number}': [doc for doc in added_documents if doc and doc[0]['source'][:2].isnumeric() and int(doc[0]['source'][:2]) == series_number] for series_number in added_series}
         new_series = get_embeddings(new_series)
         old_series = {'Summaries': series_docs['Summaries'], **{f'Series{series_number}': series_docs[f'Series{series_number}'] for series_number in self.wg if series_number in old_list}}
         
@@ -176,6 +218,8 @@ class Query:
 
 
     async def get_online_context(self, model_name='gpt-4o-mini', validator_flag= True, options=None):
+        from src.LLMs.LLM import a_submit_prompt_flex
+        from src.online_retrieval.pdf_reader import fetch_snippets_and_search
         if options is None:
             querytoOSINT = f"""Rephrase the following question so that it can be a concise google search query to find the answer to my original question (O.S.I.N.T. syle)
 
@@ -197,6 +241,8 @@ class Query:
         return online_info
     
     async def get_online_context_UI(self, model_name='gpt-4o-mini', validator_flag= True, options=None):
+        from api.LLM import a_submit_prompt_flex_UI
+        from src.online_retrieval.pdf_reader import fetch_snippets_and_search
         if options is None:
             querytoOSINT = f"""Rephrase the fallowing question so that it can be a concise google search query to find the answer to my original question (O.S.I.N.T. syle)
 

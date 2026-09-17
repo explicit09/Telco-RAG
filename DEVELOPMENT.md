@@ -1,0 +1,103 @@
+# Telco-RAG improvements
+
+This is a fork of netop-team/Telco-RAG, based on commit
+`df92a34d3ad824fe4ef45b81fc956498a353a943`. The original commit remains the
+unmodified code baseline. No baseline accuracy has been reproduced yet.
+
+## Current integration
+
+The original `Query.get_3GPP_context()` flow remains the default. It now loads
+newly routed series in the second pass, keeps candidate context as complete
+strings, and discards FAISS's -1 missing-neighbor indices.
+
+An optional `corpus` parameter on `Query` replaces the 3GPP-specific router and
+FAISS retrieval with a provider's `search(query, limit=...)` method. The original
+candidate-generation and validation stages are reused. `src.corpus.StoreCorpus`
+adapts the companion search store with explicit corpus and release filters.
+A provider may wrap another database without changing Query. Two small synthetic
+corpora exercise this connection; this is not a real cross-domain accuracy result.
+
+The `extensions/rag-lab` package provides supporting ingestion and evaluation
+utilities. Its separate experimental RAG pipeline is not the fork's production
+query path. The legacy routed path still requires its original dependencies and model credentials.
+The provider path now loads without those clients and accepts a completion callback.
+
+## Local diagnostics
+
+From the repository root:
+
+```sh
+python3 -m unittest discover -s tests -v
+cd extensions/rag-lab
+python3 -m unittest discover -s tests -v
+python3 -m raglab.cli ingest manual.docx --db corpus.sqlite --corpus equipment --document manual
+python3 -m raglab.cli search 'timer expiry' --db corpus.sqlite --corpus equipment
+```
+
+Supported ingestion formats are DOCX, Markdown, text, and JSONL. DOCX tables are
+represented as row text; complex merged-cell semantics are not fully handled.
+Lexical search works without model calls. Dense retrieval/reranking interfaces
+exist, but no concrete embedding model has yet been connected or benchmarked.
+
+## Evaluation protocol
+
+Target: at least 95% accuracy on a fixed held-out 3GPP standards subset, with
+all missing/failed/abstained questions counted in the denominator. Achieving this
+score is unproven. It is not a promise of 95% on every future database.
+
+`tools/prepare_teleqna.py` verifies the pinned TeleQnA archive SHA256, selects
+Standards specifications questions containing whole-word 3GPP but not IEEE,
+excludes known exposed examples, groups normalized exact duplicates, and writes
+separate development/test question and answer files with SHA256 manifests.
+The first split has 1,056 development and 452 test questions (seed 20260916).
+Eligibility uses no answers or model performance. This is a text-defined subset,
+not a reproduction of the paper's unpublished question-ID subset.
+
+Keep generated benchmark files outside this repository and out of retrieval
+indexes. Do not inspect held-out errors to tune the system. The current split
+has not been certified free of semantic near-duplicates, and public benchmark
+pretraining exposure cannot be ruled out. No benchmark generation has run.
+
+Subscription-backed Codex trials are intended for development. CLI read-only
+mode does not prevent reading local answer files; strict held-out runs require
+a separate process environment without access to gold data. No paid API calls
+are authorized or have been made. The optional OpenAI API generator defaults to
+refusing paid calls until explicitly enabled.
+
+## Real-corpus development tools
+
+- `tools/download_corpus.py`: downloads DOCX files at the pinned 3GPP corpus revision and checks upstream Git/LFS hashes.
+- `tools/index_corpus.py`: checks SHA256 manifests, indexes each document transactionally, and records resumable source/parser fingerprints.
+- `tools/run_development.py`: accepts a development question file, runs the original Query candidate prompt and two retrieval passes, then produces a cited structured answer via the Codex subscription. It rejects held-out filenames and never loads an answer file. Filename gating is a misuse guard, not OS isolation.
+
+The HTTP RFC 9110 corpus has passed one real two-pass smoke question with a matching supporting quotation. This is a functional portability check, not an accuracy benchmark. The first subscription trials used the CLI default model and are exploratory. The development runner now requires an explicit `--model` and writes a manifest containing code hashes, question IDs, corpus provenance, request count, and prediction checksum. Calls use no API key, but consume subscription usage.
+
+## Release metadata correction
+
+Benchmark preparation v1 incorrectly assigned Release 18 to all questions.
+Preparation v2 preserves the release explicitly stated in each public question
+and selects a matching corpus ID. Exact question IDs, split membership, wording,
+options, and gold files were verified unchanged. No held-out inference preceded
+this correction. The first three-question v1 diagnostic is superseded and must
+not be presented as a valid release-matched benchmark score.
+
+The development partition requests Releases 14, 16, 17, 18, and 19. Only the
+Release 18 corpus is currently indexed. Missing releases remain in the target
+scope; they must not be silently dropped, relabeled, or answered from a different
+release without a separately justified cross-version protocol. Direct downloads of two official ETSI Release 17 sources returned HTTP 403. Their Release 17 counterparts were subsequently downloaded, hash-verified, and indexed from the GSMA mirror. Full missing-release ingestion is in progress.
+
+## Multi-release mirror and registry
+
+The GSMA/3GPP mirror is pinned to
+`a056f6018a7e8e67052aa68a702e272d0ae95d75`. Paginated inventories contain
+1,269 Release 14, 1,453 Release 16, 1,607 Release 17, and 1,557 Release 19
+Markdown documents. Original standards remain subject to their owners' terms;
+source documents and generated indexes are local research data outside this repository.
+
+`tools/sync_missing_releases.py WORKSPACE` resumes downloads and indexing, verifies
+source hashes, and stops before another release if less than 6 GiB is free.
+A JSON corpus registry maps each corpus ID to a separate SQLite path. Pass that
+registry in place of the database argument to `tools/run_development.py`.
+Requests route only to the selected corpus and release, with no implicit fallback.
+Full original-baseline reproduction and held-out OS/process isolation remain
+outstanding. No 95% result has been established.

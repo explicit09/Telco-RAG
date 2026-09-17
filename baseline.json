@@ -1,0 +1,12 @@
+{
+  "upstream": "https://github.com/netop-team/Telco-RAG",
+  "fork": "https://github.com/explicit09/Telco-RAG",
+  "base_commit": "df92a34d3ad824fe4ef45b81fc956498a353a943",
+  "baseline_accuracy": null,
+  "held_out_accuracy": null,
+  "target_accuracy": 0.95,
+  "target_scope": "Text-defined 3GPP-only TeleQnA Standards specifications subset",
+  "benchmark_source_commit": "d7ee5e3a705240075ecbc87cce01f1f85db5d947",
+  "benchmark_protocol_version": 2,
+  "release_policy": "Strictly match public question release; missing release corpora remain outstanding"
+}
