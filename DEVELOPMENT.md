@@ -101,3 +101,30 @@ registry in place of the database argument to `tools/run_development.py`.
 Requests route only to the selected corpus and release, with no implicit fallback.
 Full original-baseline reproduction and held-out OS/process isolation remain
 outstanding. No 95% result has been established.
+
+## Current development execution
+
+The shell CLI 0.147.0 cannot use the app's configured `gpt-6-astra` model.
+The verified bundled CLI is `/Applications/ChatGPT.app/Contents/Resources/codex`
+(version 0.154.0-alpha.6.2); pass it with `--codex`. The release-matched lexical
+run of the first three development questions answered all three correctly. This
+is a smoke result, not a 95% benchmark claim or an original-paper reproduction.
+
+`--reranker DIRECTORY` enables the local ONNX cross-encoder. The current model
+is `cross-encoder/ms-marco-MiniLM-L6-v2` at revision
+`233902d25c440f23af6f7d6e94d2946bac0bee0a`, using `onnx/model_qint8_arm64.onnx`
+and `tokenizer.json`. Install the optional runtime using
+`extensions/rag-lab/requirements-rerank.txt`. Each run records model/tokenizer
+hashes and runtime versions. It reranks 40 lexical candidates; there is no dense
+index yet. It cannot recover evidence absent from that candidate set.
+
+`--deny-read-root DIRECTORY` wraps the actual CLI in a macOS sandbox denying
+reads and writes to that directory. Synthetic direct/symlink/hardlink checks
+were denied, and the HTTP answering smoke test succeeded with the entire local
+work directory blocked. This is a tested development safeguard; the runner still
+refuses held-out mode. Broader isolation and contamination audits remain pending.
+
+Runs archive their source code and checkpoint predictions after each question.
+`--resume` accepts only matching configuration and prediction hashes, and skips
+completed questions. An interruption between prediction and manifest writes
+fails closed and requires checkpoint reconciliation rather than silent reuse.

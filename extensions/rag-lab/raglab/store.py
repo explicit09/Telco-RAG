@@ -49,7 +49,9 @@ class SQLiteStore:
                 owner = self.db.execute("SELECT corpus_id, document_id FROM chunks WHERE id = ?", (chunk.id,)).fetchone()
                 if owner and (owner["corpus_id"], owner["document_id"]) != (corpus_id, document_id):
                     raise ValueError(f"chunk id already belongs to another document: {chunk.id}")
-            self.db.execute("DELETE FROM chunks_fts WHERE corpus_id = ? AND document_id = ?", (corpus_id, document_id))
+            exists = self.db.execute("SELECT 1 FROM chunks WHERE corpus_id = ? AND document_id = ? LIMIT 1", (corpus_id, document_id)).fetchone()
+            if exists:
+                self.db.execute("DELETE FROM chunks_fts WHERE corpus_id = ? AND document_id = ?", (corpus_id, document_id))
             self.db.execute("DELETE FROM chunks WHERE corpus_id = ? AND document_id = ?", (corpus_id, document_id))
             for chunk in entries:
                 self.db.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (chunk.id, chunk.corpus_id, chunk.document_id, chunk.source, chunk.title, chunk.section, chunk.text, chunk.release, json.dumps(chunk.metadata, sort_keys=True, separators=(",", ":"))))

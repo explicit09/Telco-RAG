@@ -39,3 +39,16 @@ class SubscriptionTests(unittest.TestCase):
     def test_held_out_mode_refused(self):
         with self.assertRaises(ValueError):
             SubscriptionGenerator(development_only=False)
+
+    def test_os_restrictions_wrap_the_actual_cli(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            generator=SubscriptionGenerator(deny_read_roots=[root])
+            events=[{'type':'item.completed','item':{'type':'agent_message'}}, {'type':'turn.completed','usage':{}}]
+            with patch('subprocess.run', side_effect=self.process(events)) as run:
+                answer=generator.generate(self.question,self.evidence)
+            command=run.call_args.args[0]
+            self.assertEqual(command[:2],['/usr/bin/sandbox-exec','-p'])
+            self.assertIn('deny file-read* file-write*',command[2])
+            self.assertIn(str(Path(root).resolve()),command[2])
+            self.assertEqual(answer.trace['os_denied_roots'],(str(Path(root).resolve()),))

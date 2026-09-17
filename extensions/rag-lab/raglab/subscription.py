@@ -9,13 +9,16 @@ from .generation import ANSWER_SCHEMA, make_payload, parse_answer
 
 
 class SubscriptionGenerator:
-    def __init__(self, *, model=None, max_requests=3, timeout=180, executable='codex', development_only=True):
+    def __init__(self, *, model=None, max_requests=3, timeout=180, executable='codex', development_only=True, deny_read_roots=()):
         if not development_only:
             raise ValueError('Subscription CLI is not certified for held-out evaluation')
         if max_requests < 1 or timeout <= 0:
             raise ValueError('positive limits required')
         self.model, self.max_requests, self.timeout = model, max_requests, timeout
         self.executable, self.requests = executable, 0
+        self.deny_read_roots = tuple(str(Path(root).resolve(strict=True)) for root in deny_read_roots)
+        if self.deny_read_roots and not Path("/usr/bin/sandbox-exec").is_file():
+            raise RuntimeError("OS read restrictions require macOS sandbox-exec")
 
     def generate(self, question, evidence):
         if self.requests >= self.max_requests:
@@ -50,6 +53,10 @@ class SubscriptionGenerator:
             for key, value in settings.items():
                 command += ['-c', key + '=' + json.dumps(value)]
             command += ['-']
+            if self.deny_read_roots:
+                restrictions = ' '.join('(deny file-read* file-write* (subpath ' + json.dumps(root) + '))' for root in self.deny_read_roots)
+                profile = '(version 1) (allow default) ' + restrictions
+                command = ['/usr/bin/sandbox-exec', '-p', profile, *command]
             environment = dict(os.environ)
             for key in ('OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID'):
                 environment.pop(key, None)
@@ -80,4 +87,4 @@ class SubscriptionGenerator:
             return parse_answer(question, evidence, json.loads(output.read_text()),
                                 {'provider': 'codex_subscription', 'development_only': True,
                                  'model': self.model or 'configured-default', 'usage': usage,
-                                 'request': self.requests, 'startup_warnings': startup_warnings})
+                                 'request': self.requests, 'startup_warnings': startup_warnings, 'os_denied_roots': self.deny_read_roots})

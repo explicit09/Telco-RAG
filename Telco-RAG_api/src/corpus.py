@@ -29,6 +29,6 @@ class StoreCorpus:
 
     def search(self, query: str, *, limit: int):
         return [Passage(item.chunk.id, item.chunk.text,
-                        f"{item.chunk.corpus_id}/{item.chunk.source} [{item.chunk.section}]")
+                        f"{item.chunk.corpus_id}/{item.chunk.document_id} [{item.chunk.section}]")
                 for item in self.store.search(query, corpus_ids=self.corpus_ids,
                                               release=self.release, limit=limit)]
