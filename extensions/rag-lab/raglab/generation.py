@@ -129,3 +129,43 @@ class OpenAIGenerator:
         return parse_answer(question, evidence, json.loads("".join(texts)),
                             {"model": self.model, "response_id": raw.get("id"), "usage": raw.get("usage", {}),
                              "provider_request": self.requests})
+
+
+def validate_read_request(request, evidence):
+    if not isinstance(request, dict) or set(request) != {'anchor_id', 'before', 'after'}:
+        raise ValueError('invalid document read request')
+    if not isinstance(request['anchor_id'], str) or request['anchor_id'] not in {e.chunk.id for e in evidence}:
+        raise ValueError('document read anchor must occur in supplied evidence')
+    if any(type(request[k]) is not int or not 0 <= request[k] <= 8 for k in ('before', 'after')):
+        raise ValueError('document read range must be 0..8 paragraphs')
+
+
+def make_read_payload(question, evidence, *, model, max_output_tokens):
+    payload = make_payload(question, evidence, model=model, max_output_tokens=max_output_tokens)
+    schema = copy.deepcopy(payload["text"]["format"]["schema"])
+    schema['properties']['next_read'] = {
+        'anyOf': [{'type':'null'}, {'type':'object','additionalProperties':False,
+          'properties': {'anchor_id':{'type':'string'},'before':{'type':'integer','minimum':0,'maximum':8},
+                         'after':{'type':'integer','minimum':0,'maximum':8}},
+          'required':['anchor_id','before','after']}]}
+    schema['required'].append('next_read')
+    payload['text']['format']['schema'] = schema
+    payload['input'][0]['content'] += (
+        ' When abstaining because a supplied passage omits nearby context, you may set next_read '
+        'to an object with anchor_id from the supplied evidence and before/after paragraph counts '
+        '(0 through 8), instead of next_search. This reads the same document and section. '
+        'Request at most one of next_read and next_search. Set next_read=null when answering or searching.')
+    return payload
+
+
+def parse_read_answer(question, evidence, data, trace=None):
+    from dataclasses import replace
+    if set(data) != set(ANSWER_SCHEMA['required']) | {'next_read'}:
+        raise ValueError('read-enabled answer has unexpected fields')
+    request = data['next_read']
+    if request is not None:
+        validate_read_request(request, evidence)
+        if data['abstained'] is not True or data['next_search'] is not None:
+            raise ValueError('document read requires abstention and no simultaneous search')
+    answer = parse_answer(question, evidence, {k:v for k,v in data.items() if k != 'next_read'}, trace)
+    return replace(answer, trace={**answer.trace, 'next_read':request})

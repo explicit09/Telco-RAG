@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from itertools import zip_longest
 import re
 from typing import Protocol, Sequence
 
@@ -49,10 +50,20 @@ def fuse_rankings(rankings: Sequence[Sequence[Evidence]], *, k: int = 60) -> lis
 
 class Retriever:
     def __init__(self, store: SearchStore, *, embedder: Embedder | None = None,
-                 reranker: Reranker | None = None, phrase_search: bool = False):
+                 reranker: Reranker | None = None, phrase_search: bool = False,
+                 rerank_strategy: str = "replace"):
+        if rerank_strategy not in ("replace", "interleave"):
+            raise ValueError("Unknown rerank strategy")
+        self.rerank_strategy = rerank_strategy
         self.store, self.embedder, self.reranker = store, embedder, reranker
         self.phrase_search = phrase_search
         self._vectors: dict[tuple[str, str, str], list[float]] = {}
+
+    def read_window(self, anchor_id: str, *, corpus_ids: Sequence[str], release: str | None = None,
+                    before: int = 3, after: int = 3, limit: int = 16, max_chars: int = 24000) -> list[Evidence]:
+        # A source window keeps source order and is not reranked as search results.
+        return self.store.read_window(anchor_id, corpus_ids=corpus_ids, release=release,
+                                      before=before, after=after, limit=limit, max_chars=max_chars)
 
     def search(self, query: str, *, corpus_ids: Sequence[str], release: str | None = None,
                limit: int = 8, candidates: int = 40) -> list[Evidence]:
@@ -98,5 +109,15 @@ class Retriever:
                 raise ValueError("Reranker injected evidence outside candidate set")
             if len({e.chunk.id for e in reranked}) != len(reranked):
                 raise ValueError("Reranker returned duplicate evidence")
-            evidence = reranked
+            if self.rerank_strategy == "interleave":
+                # Preserve both candidate and reranker order without comparing
+                # incompatible scores or increasing the final passage budget.
+                combined = {}
+                for pair in zip_longest(evidence, reranked):
+                    for item in pair:
+                        if item is not None:
+                            combined.setdefault(item.chunk.id, item)
+                evidence = list(combined.values())
+            else:
+                evidence = reranked
         return evidence[:limit]

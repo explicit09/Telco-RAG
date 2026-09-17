@@ -101,6 +101,40 @@ class SQLiteStore:
             result.append(Evidence(chunk, score=-rank))
         return result
 
+    def read_window(self, anchor_id: str, *, corpus_ids: Sequence[str], release: str | None = None,
+                    before: int = 3, after: int = 3, limit: int = 16, max_chars: int = 24000) -> list[Evidence]:
+        """Read bounded neighboring paragraphs in the anchor's document and section.
+
+        Split pieces with the same ordinal use deterministic ID order. This is
+        a passage window, not a reconstruction of the original document layout.
+        """
+        if not corpus_ids or type(before) is not int or type(after) is not int or not 0 <= before <= 8 or not 0 <= after <= 8:
+            raise ValueError("read window requires corpora and 0..8 neighboring ordinals")
+        if type(limit) is not int or not 1 <= limit <= 16 or type(max_chars) is not int or not 1 <= max_chars <= 24000:
+            raise ValueError("read window exceeds passage or character budget")
+        anchor = self.get_chunk(anchor_id)
+        if anchor is None or anchor.corpus_id not in corpus_ids or (release is not None and anchor.release != release):
+            raise ValueError("read anchor is outside the requested scope")
+        ordinal = anchor.metadata.get("ordinal")
+        if type(ordinal) is not int or ordinal < 1:
+            raise ValueError("read anchor has no valid paragraph ordinal")
+        rows = self.db.execute("""SELECT id FROM chunks
+            WHERE corpus_id=? AND document_id=? AND release=? AND section=?
+            AND json_type(metadata, '$.ordinal')='integer'
+            AND json_extract(metadata, '$.ordinal') BETWEEN ? AND ?
+            ORDER BY (id=?) DESC, ABS(json_extract(metadata, '$.ordinal')-?), json_extract(metadata, '$.ordinal'), id
+            LIMIT ?""", (anchor.corpus_id, anchor.document_id, anchor.release, anchor.section,
+                           max(1, ordinal-before), ordinal+after, anchor_id, ordinal, limit))
+        result = []
+        used = 0
+        for row in rows:
+            chunk = self.get_chunk(row["id"])
+            if used + len(chunk.text) > max_chars:
+                continue
+            result.append(Evidence(chunk, 0.0, "document_read"))
+            used += len(chunk.text)
+        return sorted(result, key=lambda e: (e.chunk.metadata["ordinal"], e.chunk.id))
+
     def get_chunk(self, chunk_id: str) -> Chunk | None:
         r = self.db.execute("SELECT * FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
         return None if r is None else Chunk(r["id"], r["corpus_id"], r["document_id"], r["source"], r["title"], r["section"], r["text"], r["release"], json.loads(r["metadata"]))

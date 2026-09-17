@@ -69,6 +69,41 @@ def _plain_blocks(path: Path) -> list[tuple[str, str, str, int, dict]]:
     return blocks
 
 
+W='http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+M='http://schemas.openxmlformats.org/officeDocument/2006/math'
+def _word_inline_text(node, unsupported=None):
+    unsupported = set() if unsupported is None else unsupported
+    tag=node.tag.rsplit('}',1)[-1]
+    math=node.tag.startswith('{'+M+'}')
+    def child(name):
+        item=node.find('{'+M+'}'+name)
+        return _word_inline_text(item,unsupported) if item is not None else ''
+    def prop(group,name,default):
+        item=node.find('{'+M+'}'+group+'/{'+M+'}'+name)
+        return item.get('{'+M+'}val',default) if item is not None else default
+    if tag=='t' and node.tag in ('{'+W+'}t','{'+M+'}t'):return node.text or ''
+    if not math and tag in ('tab','br'):return ' '
+    if tag.endswith('Pr'):return ''
+    if math:
+        if tag=='sSub':return '('+child('e')+')_{'+child('sub')+'}'
+        if tag=='sSup':return '('+child('e')+')^{'+child('sup')+'}'
+        if tag=='sSubSup':return '('+child('e')+')_{'+child('sub')+'}^{'+child('sup')+'}'
+        if tag=='f':return '(('+child('num')+')/('+child('den')+'))'
+        if tag=='d':return prop('dPr','begChr','(')+prop('dPr','sepChr','|').join(_word_inline_text(x,unsupported) for x in node.findall('{'+M+'}e'))+prop('dPr','endChr',')')
+        if tag=='func':return child('fName')+'('+child('e')+')'
+        if tag=='nary':
+            symbol=prop('naryPr','chr','[unspecified n-ary operator]')
+            if symbol.startswith('['):unsupported.add('nary operator without explicit chr')
+            return symbol+'_{'+child('sub')+'}^{'+child('sup')+'}('+child('e')+')'
+        if tag=='acc':return 'accent['+prop('accPr','chr','unspecified')+']('+child('e')+')'
+        if tag=='bar':return 'bar['+prop('barPr','pos','unspecified')+']('+child('e')+')'
+        if tag=='limLow':return child('e')+'_{'+child('lim')+'}'
+        if tag not in {'oMath','oMathPara','r','e','sub','sup','num','den','fName','lim'}:
+            unsupported.add(tag)
+            return '[unsupported '+tag+': '+''.join(_word_inline_text(x,unsupported) for x in node)+']'
+    return ''.join(_word_inline_text(x,unsupported) for x in node)
+
+
 def _docx_blocks(path: Path) -> list[tuple[str, str, str, int, dict]]:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -90,7 +125,7 @@ def _docx_blocks(path: Path) -> list[tuple[str, str, str, int, dict]]:
     for child in body:
         tag = child.tag.rsplit("}", 1)[-1]
         if tag == "p":
-            value = "".join(node.text or "" for node in child.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")).strip()
+            value = _word_inline_text(child).strip()
             if not value:
                 continue
             style = child.find("w:pPr/w:pStyle", _NS)
@@ -104,7 +139,7 @@ def _docx_blocks(path: Path) -> list[tuple[str, str, str, int, dict]]:
             table_ordinal += 1
             rows: list[str] = []
             for row in child.findall("w:tr", _NS):
-                cells = ["".join(node.text or "" for node in cell.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")).strip() for cell in row.findall("w:tc", _NS)]
+                cells = [_word_inline_text(cell).strip() for cell in row.findall("w:tc", _NS)]
                 row_text = " | ".join(cells)
                 if any(cells):
                     rows.append(row_text)

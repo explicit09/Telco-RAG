@@ -5,15 +5,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from .generation import make_payload, parse_answer
+from .generation import ANSWER_SCHEMA, make_payload, parse_answer, make_read_payload, parse_read_answer
 
 
 class SubscriptionGenerator:
-    def __init__(self, *, model=None, max_requests=3, timeout=180, executable='codex', development_only=True, deny_read_roots=()):
+    def __init__(self, *, model=None, max_requests=3, timeout=180, executable='codex', development_only=True, deny_read_roots=(), allow_document_reads=False):
         if not development_only:
             raise ValueError('Subscription CLI is not certified for held-out evaluation')
         if max_requests < 1 or timeout <= 0:
             raise ValueError('positive limits required')
+        self.allow_document_reads = allow_document_reads
         self.model, self.max_requests, self.timeout = model, max_requests, timeout
         self.executable, self.requests = executable, 0
         self.deny_read_roots = tuple(str(Path(root).resolve(strict=True)) for root in deny_read_roots)
@@ -23,7 +24,8 @@ class SubscriptionGenerator:
     def generate(self, question, evidence):
         if self.requests >= self.max_requests:
             raise RuntimeError('Subscription request budget exhausted')
-        payload = make_payload(question, evidence, model=self.model or 'configured-default', max_output_tokens=1200)
+        payload_factory = make_read_payload if self.allow_document_reads else make_payload
+        payload = payload_factory(question, evidence, model=self.model or 'configured-default', max_output_tokens=1200)
         prompt = '\n\n'.join(message['content'] for message in payload['input'])
         prompt += '\nReturn only the requested JSON object. Do not invoke tools or read local files.'
         settings = {
@@ -44,7 +46,7 @@ class SubscriptionGenerator:
         with tempfile.TemporaryDirectory(prefix='raglab-dev-') as folder:
             folder = Path(folder)
             schema, output = folder / 'schema.json', folder / 'answer.json'
-            schema.write_text(json.dumps(payload["text"]["format"]["schema"]))
+            schema.write_text(json.dumps(payload['text']['format']['schema']))
             command = [self.executable, 'exec', '--ignore-user-config', '--ephemeral', '--json',
                        '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder),
                        '--output-schema', str(schema), '--output-last-message', str(output)]
@@ -84,7 +86,8 @@ class SubscriptionGenerator:
                     raise RuntimeError('Unexpected CLI event; reject this development run')
             if not output.is_file():
                 raise RuntimeError('CLI returned no structured answer')
-            return parse_answer(question, evidence, json.loads(output.read_text()),
+            parser = parse_read_answer if self.allow_document_reads else parse_answer
+            return parser(question, evidence, json.loads(output.read_text()),
                                 {'provider': 'codex_subscription', 'development_only': True,
                                  'model': self.model or 'configured-default', 'usage': usage,
                                  'request': self.requests, 'startup_warnings': startup_warnings, 'os_denied_roots': self.deny_read_roots})

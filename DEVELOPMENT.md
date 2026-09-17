@@ -228,4 +228,41 @@ The subsequent first-20 run, with the Release 17 supplement and one follow-up
 search, scored 14/20 (70%), with two abstentions and no execution failures. It
 gained three correct answers and regressed on one versus the earlier 60% run.
 Corpus and retrieval behavior changed together; this is a combined development
-result, not an isolated causal estimate. The 100-question sample is still pending.
+result, not an isolated causal estimate.
+
+
+## Completed larger development run
+
+The frozen 100-question development run with all five release supplements,
+phrase search, reranking, and one follow-up scored 58/100. It retained 15 wrong
+answers, 22 abstentions, and five failures (one timeout, three disk I/O errors,
+and one invalid option ID). No failures were removed or retried for that score.
+The 95% Wilson interval is 48.2–67.2%. These are development results; no held-out
+accuracy has been established. Public benchmark pretraining exposure cannot be
+ruled out.
+
+## Optional document reads and ranking interleaving
+
+`--document-reads` lets an abstaining model request neighboring passages using an
+anchor already supplied as evidence. Reads stay within the same document,
+section, corpus and release, with at most eight neighboring ordinals per side,
+16 passages and 24,000 characters. Reads and searches share `--followups`; this
+flag does not add model calls beyond that budget. Unknown anchors, conflicting
+chunk contents and requests combining a read with a search are rejected.
+
+`--rerank-strategy replace|interleave` defaults to `replace`. With a reranker,
+`interleave` alternates the fused candidate order and reranker order, deduplicates
+chunk IDs, and retains the existing top-k passage limit. Without a reranker it
+has no effect. Both settings are recorded in run manifests and checked on resume.
+
+A matched comparison on the existing 20 development questions used the same
+code, corpus and document-read setting: replacement scored 15/20 (75%) and
+interleaving 16/20 (80%), with one improvement, no regressions and no execution
+failures. This small reused sample does not establish a general improvement;
+model sampling variability remains. The reference answer files were unchanged.
+
+DOCX ingestion now preserves common Office Math structures (including scripts,
+fractions and delimiters) and equation-only paragraphs. Unsupported structures
+are marked explicitly. Existing indexes retain their original parser output;
+rebuild into a separate versioned database to evaluate this change. This is not
+a complete mathematical-layout renderer.

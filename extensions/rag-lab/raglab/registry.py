@@ -47,6 +47,26 @@ class CorpusRegistry:
                     for corpus in dict.fromkeys(corpus_ids) for store in self._stores_for(corpus)]
         return fuse_rankings(rankings)[:limit]
 
+    def read_window(self, anchor_id, *, corpus_ids, release=None, before=3, after=3,
+                    limit=16, max_chars=24000):
+        if not corpus_ids:
+            raise ValueError('corpus_ids must be non-empty')
+        owners, seen = [], set()
+        for corpus in dict.fromkeys(corpus_ids):
+            for store in self._stores_for(corpus):
+                key = (id(store), corpus)
+                if key in seen:
+                    continue
+                seen.add(key)
+                chunk = store.get_chunk(anchor_id)
+                if chunk is not None and chunk.corpus_id == corpus and (release is None or chunk.release == release):
+                    owners.append((store, chunk))
+        if len(owners) != 1:
+            raise ValueError('read anchor must have exactly one owner in the requested scope')
+        store, chunk = owners[0]
+        return store.read_window(anchor_id, corpus_ids=[chunk.corpus_id], release=release,
+                                 before=before, after=after, limit=limit, max_chars=max_chars)
+
     def get_chunk(self, identifier):
         # Only previously requested corpora in opened databases are eligible.
         found = []

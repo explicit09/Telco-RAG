@@ -58,6 +58,8 @@ def main():
     p.add_argument('--top-k', type=int, default=8)
     p.add_argument('--reranker', type=Path)
     p.add_argument('--phrase-search', action='store_true')
+    p.add_argument('--document-reads', action='store_true', help='Allow bounded same-section reads within the follow-up budget')
+    p.add_argument('--rerank-strategy', choices=('replace', 'interleave'), default='replace')
     a = p.parse_args()
     if a.questions.name != 'dev.questions.jsonl':
         raise ValueError('Only dev.questions.jsonl is accepted; this runner is not held-out isolated')
@@ -71,7 +73,7 @@ def main():
         from raglab.reranking import ONNXReranker
         reranker = ONNXReranker(a.reranker)
     predictions = {}
-    generator = SubscriptionGenerator(model=a.model, max_requests=(2 + a.followups) * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root)
+    generator = SubscriptionGenerator(model=a.model, max_requests=(2 + a.followups) * len(questions), executable=a.codex, deny_read_roots=a.deny_read_root, allow_document_reads=a.document_reads)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     if a.database.suffix == '.json':
         store_provider = CorpusRegistry(a.database)
@@ -95,6 +97,8 @@ def main():
         'status': 'running',
         'reranker': reranker.provenance if reranker else None,
         'phrase_search': a.phrase_search,
+        'document_reads': a.document_reads,
+        'rerank_strategy': a.rerank_strategy,
     }
     manifest_path = a.output.with_suffix('.manifest.json')
     previous_requests = 0
@@ -112,7 +116,7 @@ def main():
         run_manifest['predictions_sha256'] = hashlib.sha256(a.output.read_bytes()).hexdigest()
     atomic_json(manifest_path, run_manifest)
     with store_provider as store:
-        search_provider = Retriever(store, reranker=reranker, phrase_search=a.phrase_search) if reranker or a.phrase_search else store
+        search_provider = Retriever(store, reranker=reranker, phrase_search=a.phrase_search, rerank_strategy=a.rerank_strategy) if reranker or a.phrase_search else store
         for question in questions:
             if question.id in predictions:
                 continue
@@ -141,7 +145,8 @@ def main():
                 if not evidence:
                     raise ValueError('no evidence retrieved')
                 answer = answer_with_followup(question, evidence, generator, search_provider, limit=a.top_k,
-                                              max_followups=a.followups, initial_query=flow.enhanced_query)
+                                              max_followups=a.followups, initial_query=flow.enhanced_query,
+                                              allow_document_reads=a.document_reads)
                 predictions[question.id] = answer.to_dict()
             except Exception as exc:
                 predictions[question.id] = {'question_id': question.id, 'selected_option': None, 'abstained': False, 'failed': True, 'error': str(exc), 'development_only': True}
