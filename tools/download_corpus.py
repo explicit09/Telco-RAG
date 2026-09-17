@@ -1,15 +1,37 @@
 """Download a pinned public corpus, verify upstream hashes, and write a manifest."""
 import argparse
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 from pathlib import Path
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 REVISION = "b8d598e50cada8aaa4de641abbec77bef6b51839"
 BASE = f"https://huggingface.co/datasets/netop/3GPP-R18/resolve/{REVISION}/"
+
+
+def retry_delay(error, attempt):
+    """Honor server cooldowns; otherwise back off on throttling and outages."""
+    fallback = min(60, 2 ** attempt)
+    if isinstance(error, urllib.error.HTTPError):
+        if error.code not in (429, 500, 502, 503, 504):
+            raise error
+        if error.code == 429:
+            fallback = max(60, fallback)
+        value = error.headers.get('Retry-After') if error.headers else None
+        if value:
+            try:
+                return max(fallback, float(value))
+            except ValueError:
+                try:
+                    return max(fallback, parsedate_to_datetime(value).timestamp() - time.time())
+                except (ValueError, TypeError, OverflowError):
+                    pass
+    return fallback
 
 
 def verified(path, row):
@@ -26,7 +48,11 @@ def main():
     parser.add_argument('inventory', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--limit', type=int)
+    parser.add_argument('--workers', type=int, default=1)
+    parser.add_argument('--attempts', type=int, default=6)
     args = parser.parse_args()
+    if args.workers < 1 or args.attempts < 1:
+        parser.error('workers and attempts must be positive')
     inventory = json.loads(args.inventory.read_text())
     mirrored = isinstance(inventory, dict)
     repository = inventory['repository'] if mirrored else 'netop/3GPP-R18'
@@ -47,7 +73,7 @@ def main():
         path = args.output / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         if not verified(path, row):
-            for attempt in range(3):
+            for attempt in range(args.attempts):
                 try:
                     with urllib.request.urlopen(base + urllib.parse.quote(row['path']), timeout=90) as response:
                         data = response.read()
@@ -57,14 +83,16 @@ def main():
                         raise ValueError(f"upstream hash mismatch: {name}")
                     temp.replace(path)
                     break
-                except Exception:
-                    if attempt == 2:
+                except Exception as error:
+                    if attempt == args.attempts - 1:
                         raise
-                    time.sleep(2 ** attempt)
+                    delay = retry_delay(error, attempt)
+                    print(f'retrying {name} after {delay:.0f}s ({type(error).__name__})', flush=True)
+                    time.sleep(delay)
         return {'path': name, 'size': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'upstream_path': row['path']}
 
     results = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(fetch, row): row for row in rows}
         for future in as_completed(futures):
             results.append(future.result())
