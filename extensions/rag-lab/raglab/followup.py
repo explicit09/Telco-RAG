@@ -21,9 +21,12 @@ def answer_with_followup(question, evidence, generator, store, *, limit=8, max_f
     searches = 0
     reads = 0
     seen_reads = set()
+    feedback = None
     for step in range(max_followups + 1):
-        answer = generator.generate(question, evidence)
-        rounds.append({'query':query,'evidence':[item.to_dict() for item in evidence], 'answer':answer.to_dict()})
+        answer = (generator.generate(question, evidence, retrieval_feedback=feedback)
+                  if feedback is not None else generator.generate(question, evidence))
+        rounds.append({'query':query,'evidence':[item.to_dict() for item in evidence], 'answer':answer.to_dict(), 'retrieval_feedback':feedback})
+        feedback = None
         query = answer.trace.get('next_search')
         request = answer.trace.get('next_read')
         if not answer.abstained or step == max_followups:
@@ -59,6 +62,10 @@ def answer_with_followup(question, evidence, generator, store, *, limit=8, max_f
         if any(item.chunk.id in previous and previous[item.chunk.id] != item.chunk for item in fresh):
             raise ValueError('conflicting follow-up chunk content')
         if not any(item.chunk.id not in previous for item in fresh):
+            if allow_search_modes and request is None:
+                feedback = {'query': query, 'match_mode': mode, 'result_count': len(fresh),
+                            'new_evidence_count': 0, 'status': 'no_new_evidence'}
+                continue
             break
         combined = {}
         for item in fresh + evidence:

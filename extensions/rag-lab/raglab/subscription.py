@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from .generation import make_payload, parse_answer, make_read_payload, parse_read_answer, make_search_payload, parse_search_answer
+from .generation import make_payload, parse_answer, make_read_payload, parse_read_answer, make_search_payload, parse_search_answer, add_retrieval_feedback
 
 
 class SubscriptionGenerator:
@@ -23,13 +23,14 @@ class SubscriptionGenerator:
         if self.deny_read_roots and not Path("/usr/bin/sandbox-exec").is_file():
             raise RuntimeError("OS read restrictions require macOS sandbox-exec")
 
-    def generate(self, question, evidence):
+    def generate(self, question, evidence, *, retrieval_feedback=None):
         if self.requests >= self.max_requests:
             raise RuntimeError('Subscription request budget exhausted')
         payload_factory = make_read_payload if self.allow_document_reads else make_payload
         if self.allow_search_modes:
             payload_factory = partial(make_search_payload, allow_document_reads=self.allow_document_reads)
         payload = payload_factory(question, evidence, model=self.model or 'configured-default', max_output_tokens=1200)
+        add_retrieval_feedback(payload, retrieval_feedback)
         prompt = '\n\n'.join(message['content'] for message in payload['input'])
         prompt += '\nReturn only the requested JSON object. Do not invoke tools or read local files.'
         settings = {

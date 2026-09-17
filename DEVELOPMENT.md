@@ -280,6 +280,9 @@ The development runner's opt-in `--search-modes` exposes this choice through
 budgets. On one development QoS query chosen during diagnosis, all-mode retrieved
 the direct rule at rank 6 while any-mode missed it in the top eight. An autonomous
 one-question diagnostic chose an overly strict all-mode query, found no new
-passages and abstained. This is not an accuracy improvement. The current loop
-stops on no-new-evidence results; feedback-driven query relaxation remains work
-to evaluate.
+passages and abstained. This is not an accuracy improvement. With search modes enabled, no-new-evidence results are now reported to the
+model as structured retrieval feedback. It can reformulate or relax matching
+within the existing follow-up budget; the public question stays unchanged,
+and the same query/mode pair is never executed twice. The legacy mode still
+stops on no new evidence. Empty search results are not evidence that a factual
+claim is false. This behavior has not established a benchmark accuracy gain.
